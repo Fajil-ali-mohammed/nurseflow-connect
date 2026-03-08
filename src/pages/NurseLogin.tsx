@@ -50,23 +50,9 @@ const NurseLogin = () => {
         if (signUpError) throw signUpError;
 
         if (signUpData.user) {
-          // Assign nurse role
-          const { error: roleError } = await supabase.from("user_roles").insert({
-            user_id: signUpData.user.id,
-            role: "nurse" as const,
-          });
-          if (roleError) throw roleError;
-
-          // Link nurse record to this user
-          const { error: linkError } = await supabase
-            .from("nurses")
-            .update({ user_id: signUpData.user.id, name })
-            .eq("phone", phone)
-            .is("user_id", null);
-          if (linkError) throw linkError;
-
+          // Role assignment and nurse linking are handled automatically by database trigger
           toast({ title: "Registration Successful", description: "Welcome to Caritas Hospital!" });
-          navigate("/nurse-dashboard");
+          // Navigation handled by auth context useEffect
         }
       } else {
         // Login
