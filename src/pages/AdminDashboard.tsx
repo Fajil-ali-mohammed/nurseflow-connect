@@ -13,6 +13,13 @@ type Tab = "overview" | "nurses" | "schedules" | "swaps" | "logs";
 const AdminDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   const tabs = [
     { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
