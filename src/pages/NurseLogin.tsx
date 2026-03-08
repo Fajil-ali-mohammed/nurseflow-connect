@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft, Phone, Lock, UserPlus, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/logo.png";
 
 const NurseLogin = () => {
@@ -15,6 +16,13 @@ const NurseLogin = () => {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { user, role: authRole, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && user && authRole === "nurse") {
+      navigate("/nurse-dashboard", { replace: true });
+    }
+  }, [authLoading, user, authRole, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
