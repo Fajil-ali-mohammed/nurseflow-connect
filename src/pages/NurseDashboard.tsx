@@ -209,6 +209,20 @@ const NurseDashboard = () => {
           </div>
         </header>
 
+        {showPushBanner && (
+          <div className="mx-4 mt-4 flex items-center gap-3 rounded-xl bg-primary/10 border border-primary/20 p-4 md:mx-6">
+            <BellRing className="h-5 w-5 text-primary shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">Enable Push Notifications</p>
+              <p className="text-xs text-muted-foreground">Get duty reminders 5h, 3h, and 1h before your shifts.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={handleDismissPush} className="text-xs">Dismiss</Button>
+              <Button size="sm" onClick={handleEnablePush} className="text-xs">Enable</Button>
+            </div>
+          </div>
+        )}
+
         <div className="p-4 md:p-6">
           {activeTab === "schedule" && nurseProfile && <ScheduleView nurseId={nurseProfile.id} deptName={nurseProfile.departments?.name || "Unassigned"} />}
           {activeTab === "swap" && nurseProfile && <SwapView nurseId={nurseProfile.id} divisionId={nurseProfile.division_id} />}
