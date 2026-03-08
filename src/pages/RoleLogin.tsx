@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState, forwardRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft, User, Lock, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/logo.png";
 
 interface RoleLoginProps {
@@ -18,17 +19,25 @@ const RoleLogin = ({ role, dashboardPath, emailDomain }: RoleLoginProps) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const { user, role: authRole, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  const expectedRole = role === "Admin" ? "admin" : "head_nurse";
+
+  useEffect(() => {
+    if (!authLoading && user && authRole === expectedRole) {
+      navigate(dashboardPath, { replace: true });
+    }
+  }, [authLoading, user, authRole, expectedRole, navigate, dashboardPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const email = `${username}@${emailDomain}`;
+      const email = `${username.trim()}@${emailDomain}`;
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      navigate(dashboardPath);
     } catch (error: any) {
       toast({
         title: "Login Failed",
@@ -79,5 +88,12 @@ const RoleLogin = ({ role, dashboardPath, emailDomain }: RoleLoginProps) => {
   );
 };
 
-export const HeadNurseLogin = () => <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" emailDomain="headnurse.local" />;
-export const AdminLogin = () => <RoleLogin role="Admin" dashboardPath="/admin-dashboard" emailDomain="admin.local" />;
+export const HeadNurseLogin = forwardRef<HTMLDivElement>((_props, _ref) => (
+  <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" emailDomain="headnurse.local" />
+));
+HeadNurseLogin.displayName = "HeadNurseLogin";
+
+export const AdminLogin = forwardRef<HTMLDivElement>((_props, _ref) => (
+  <RoleLogin role="Admin" dashboardPath="/admin-dashboard" emailDomain="admin.local" />
+));
+AdminLogin.displayName = "AdminLogin";
