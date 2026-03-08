@@ -58,7 +58,7 @@ const RoleLogin = ({ role, dashboardPath, emailDomain }: RoleLoginProps) => {
         </Link>
         <div className="rounded-2xl bg-card p-8 shadow-card">
           <div className="flex flex-col items-center">
-            <img src={logo} alt="Nurses Connect" className="h-16 w-16 rounded-xl" />
+            <img src={logo} alt="Caritas Hospital" className="h-16 w-16 rounded-xl" />
             <h1 className="mt-4 text-2xl font-bold text-foreground">{role} Login</h1>
             <p className="mt-1 text-sm text-muted-foreground">Access the {role.toLowerCase()} dashboard</p>
           </div>

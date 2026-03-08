@@ -65,7 +65,7 @@ const NurseLogin = () => {
             .is("user_id", null);
           if (linkError) throw linkError;
 
-          toast({ title: "Registration Successful", description: "Welcome to Nurses Connect!" });
+          toast({ title: "Registration Successful", description: "Welcome to Caritas Hospital!" });
           navigate("/nurse-dashboard");
         }
       } else {

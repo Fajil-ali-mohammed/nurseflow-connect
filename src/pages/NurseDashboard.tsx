@@ -133,7 +133,7 @@ const NurseDashboard = () => {
           <div className="flex items-center gap-3 border-b p-4">
             <img src={logo} alt="Logo" className="h-10 w-10 rounded-lg" />
             <div>
-              <p className="text-sm font-bold text-foreground">Nurses Connect</p>
+              <p className="text-sm font-bold text-foreground">Caritas Hospital</p>
               <p className="text-xs text-muted-foreground">Nurse Portal</p>
             </div>
             <button onClick={() => setSidebarOpen(false)} className="ml-auto md:hidden"><X size={20} /></button>

@@ -62,7 +62,7 @@ const AdminDashboard = () => {
         <div className="flex h-full flex-col">
           <div className="flex items-center gap-3 border-b p-4">
             <img src={logo} alt="Logo" className="h-10 w-10 rounded-lg" />
-            <div><p className="text-sm font-bold text-foreground">Nurses Connect</p><p className="text-xs text-muted-foreground">Admin Panel</p></div>
+            <div><p className="text-sm font-bold text-foreground">Caritas Hospital</p><p className="text-xs text-muted-foreground">Admin Panel</p></div>
             <button onClick={() => setSidebarOpen(false)} className="ml-auto md:hidden"><X size={20} /></button>
           </div>
           <nav className="flex-1 space-y-1 p-3">
