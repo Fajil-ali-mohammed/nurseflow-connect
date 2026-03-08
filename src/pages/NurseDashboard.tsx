@@ -55,6 +55,32 @@ const NurseDashboard = () => {
   const [nurseProfile, setNurseProfile] = useState<NurseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showPushBanner, setShowPushBanner] = useState(false);
+
+  // Prompt for push notifications
+  useEffect(() => {
+    if (!user) return;
+    if (!isPushSupported()) return;
+    if (Notification.permission === "granted") return;
+    if (localStorage.getItem("push_dismissed")) return;
+    setShowPushBanner(true);
+  }, [user]);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    const success = await subscribeToPush(user.id);
+    if (success) {
+      toast({ title: "Notifications Enabled", description: "You'll receive duty reminders on this device." });
+    } else {
+      toast({ title: "Could not enable", description: "Please allow notifications in your browser settings.", variant: "destructive" });
+    }
+    setShowPushBanner(false);
+  };
+
+  const handleDismissPush = () => {
+    localStorage.setItem("push_dismissed", "true");
+    setShowPushBanner(false);
+  };
 
   useEffect(() => {
     if (!user) return;
