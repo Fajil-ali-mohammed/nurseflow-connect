@@ -9,13 +9,12 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import {
   Calendar, Users, ArrowLeftRight, ClipboardCheck, UserPlus, LogOut,
-  Menu, X, Check, XCircle, Search, Download, Star, Trash2, Loader2, Wand2
+  Menu, X, Check, XCircle, Search, Star, Trash2, Loader2, Wand2
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 
 type Tab = "schedule" | "swaps" | "performance" | "manage";
 
-// Helper: get current ISO week number
 function getISOWeek(date: Date): number {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -27,13 +26,37 @@ function getISOWeek(date: Date): number {
 const HeadNurseDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("schedule");
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const navigate = useNavigate();
+
+  const [hnProfile, setHnProfile] = useState<{ name: string; department_name: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchProfile = async () => {
+      const { data } = await supabase
+        .from("head_nurses")
+        .select("name, departments:departments(name)")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data) {
+        setHnProfile({
+          name: data.name,
+          department_name: (data.departments as any)?.name ?? null,
+        });
+      }
+    };
+    fetchProfile();
+  }, [user]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/");
   };
+
+  const initials = hnProfile?.name
+    ? hnProfile.name.split(" ").map((w) => w[0]).join("").toUpperCase()
+    : "HN";
 
   const tabs = [
     { key: "schedule" as const, icon: Calendar, label: "Weekly Schedule" },
@@ -48,7 +71,10 @@ const HeadNurseDashboard = () => {
         <div className="flex h-full flex-col">
           <div className="flex items-center gap-3 border-b p-4">
             <img src={logo} alt="Logo" className="h-10 w-10 rounded-lg" />
-            <div><p className="text-sm font-bold text-foreground">Nurses Connect</p><p className="text-xs text-muted-foreground">Head Nurse</p></div>
+            <div>
+              <p className="text-sm font-bold text-foreground">Nurses Connect</p>
+              <p className="text-xs text-muted-foreground">{hnProfile?.name || "Head Nurse"}</p>
+            </div>
             <button onClick={() => setSidebarOpen(false)} className="ml-auto md:hidden"><X size={20} /></button>
           </div>
           <nav className="flex-1 space-y-1 p-3">
@@ -71,8 +97,13 @@ const HeadNurseDashboard = () => {
       <main className="flex-1">
         <header className="flex items-center justify-between border-b bg-card px-4 py-3 md:px-6">
           <button onClick={() => setSidebarOpen(true)} className="md:hidden"><Menu size={22} /></button>
-          <div><h1 className="text-lg font-bold text-foreground">Head Nurse <span className="text-primary">Dashboard</span></h1></div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">HN</div>
+          <div>
+            <h1 className="text-lg font-bold text-foreground">Head Nurse <span className="text-primary">Dashboard</span></h1>
+            {hnProfile?.department_name && (
+              <p className="text-xs text-muted-foreground">{hnProfile.department_name}</p>
+            )}
+          </div>
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials}</div>
         </header>
 
         <div className="p-4 md:p-6">
@@ -139,7 +170,6 @@ const HNScheduleView = () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
-
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/generate-schedule`,
@@ -153,10 +183,8 @@ const HNScheduleView = () => {
           body: JSON.stringify({ week_number: selectedWeek, year: selectedYear }),
         }
       );
-
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Failed to generate");
-
       toast({
         title: "Schedule Generated",
         description: `Created ${result.stats.total_entries} shift entries for ${result.stats.nurses_scheduled} nurses.`,
@@ -188,23 +216,9 @@ const HNScheduleView = () => {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1">
             <Label className="text-xs text-muted-foreground">Week:</Label>
-            <Input
-              type="number"
-              min={1}
-              max={53}
-              value={selectedWeek}
-              onChange={(e) => setSelectedWeek(Number(e.target.value))}
-              className="w-20 h-9"
-            />
+            <Input type="number" min={1} max={53} value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))} className="w-20 h-9" />
             <Label className="text-xs text-muted-foreground ml-1">Year:</Label>
-            <Input
-              type="number"
-              min={2024}
-              max={2030}
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="w-24 h-9"
-            />
+            <Input type="number" min={2024} max={2030} value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-24 h-9" />
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -363,19 +377,37 @@ const HNSwapView = () => {
 
 const HNPerformanceView = () => {
   const [nurses, setNurses] = useState<any[]>([]);
+  const [evaluations, setEvaluations] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchNurses = async () => {
-      const { data, error } = await supabase
-        .from("nurses")
-        .select("id, name, division_id, current_department_id, experience_years, divisions:divisions(name), departments:departments(name)")
-        .eq("is_active", true);
+    const fetchData = async () => {
+      const [nursesRes, evalsRes] = await Promise.all([
+        supabase
+          .from("nurses")
+          .select("id, name, division_id, current_department_id, experience_years, divisions:divisions(name), departments:departments(name)")
+          .eq("is_active", true),
+        supabase
+          .from("performance_evaluations")
+          .select("nurse_id, overall_score, attendance_score, quality_score, reliability_score, evaluation_period, remarks")
+          .order("created_at", { ascending: false }),
+      ]);
 
-      if (!error) setNurses(data || []);
+      if (!nursesRes.error) setNurses(nursesRes.data || []);
+
+      // Group evaluations by nurse_id, keep latest
+      const evalMap: Record<string, any> = {};
+      if (!evalsRes.error && evalsRes.data) {
+        for (const ev of evalsRes.data) {
+          if (!evalMap[ev.nurse_id]) {
+            evalMap[ev.nurse_id] = ev;
+          }
+        }
+      }
+      setEvaluations(evalMap);
       setLoading(false);
     };
-    fetchNurses();
+    fetchData();
   }, []);
 
   if (loading) {
@@ -393,7 +425,12 @@ const HNPerformanceView = () => {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {nurses.map((n) => {
-            const score = Math.floor(Math.random() * 30) + 70; // placeholder until evaluations are fetched
+            const ev = evaluations[n.id];
+            const score = ev?.overall_score ? Number(ev.overall_score) : null;
+            const attendanceScore = ev?.attendance_score ? Number(ev.attendance_score) : null;
+            const qualityScore = ev?.quality_score ? Number(ev.quality_score) : null;
+            const reliabilityScore = ev?.reliability_score ? Number(ev.reliability_score) : null;
+
             return (
               <div key={n.id} className="rounded-xl bg-card p-5 shadow-card">
                 <div className="flex items-center justify-between">
@@ -410,15 +447,29 @@ const HNPerformanceView = () => {
                   </div>
                   <div className="flex items-center gap-1">
                     <Star className="h-4 w-4 text-accent" fill="currentColor" />
-                    <span className="text-sm font-bold text-foreground">{score}%</span>
+                    <span className="text-sm font-bold text-foreground">{score !== null ? `${score}%` : "N/A"}</span>
                   </div>
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-muted">
-                  <div className="h-2 rounded-full bg-primary" style={{ width: `${score}%` }} />
-                </div>
-                <div className="mt-3 flex justify-between text-xs text-muted-foreground">
-                  <span>Experience: {n.experience_years || 0} yrs</span>
-                  <span>Attendance: {score > 85 ? "Excellent" : "Good"}</span>
+                {score !== null ? (
+                  <>
+                    <div className="mt-3 h-2 rounded-full bg-muted">
+                      <div className="h-2 rounded-full bg-primary" style={{ width: `${score}%` }} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+                      <span>Attendance: {attendanceScore ?? "—"}%</span>
+                      <span>Quality: {qualityScore ?? "—"}%</span>
+                      <span>Reliability: {reliabilityScore ?? "—"}%</span>
+                    </div>
+                    {ev?.remarks && (
+                      <p className="mt-2 text-xs text-muted-foreground italic">"{ev.remarks}"</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">No evaluation recorded yet</p>
+                )}
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Experience: {n.experience_years || 0} yrs
+                  {ev?.evaluation_period && <span> • Period: {ev.evaluation_period}</span>}
                 </div>
               </div>
             );
@@ -438,18 +489,20 @@ const HNManageView = () => {
   const [departments, setDepartments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
-  // Add form state
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newAge, setNewAge] = useState("");
   const [newGender, setNewGender] = useState("");
   const [newDivisionId, setNewDivisionId] = useState("");
   const [newDeptId, setNewDeptId] = useState("");
+  const [newExperience, setNewExperience] = useState("");
+  const [newExamScore, setNewExamScore] = useState("");
 
   const fetchData = useCallback(async () => {
     const [nursesRes, divsRes, deptsRes] = await Promise.all([
-      supabase.from("nurses").select("id, name, phone, division_id, current_department_id, is_active, divisions:divisions(name), departments:departments(name)").eq("is_active", true),
+      supabase.from("nurses").select("id, name, phone, age, gender, experience_years, exam_score_percentage, division_id, current_department_id, is_active, divisions:divisions(name), departments:departments(name)").eq("is_active", true),
       supabase.from("divisions").select("id, name"),
       supabase.from("departments").select("id, name"),
     ]);
@@ -474,13 +527,15 @@ const HNManageView = () => {
       gender: newGender as any || null,
       division_id: newDivisionId || null,
       current_department_id: newDeptId || null,
+      experience_years: newExperience ? parseInt(newExperience) : 0,
+      exam_score_percentage: newExamScore ? parseFloat(newExamScore) : null,
     });
 
     if (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Nurse Added", description: `${newName} has been added to the system.` });
-      setNewName(""); setNewPhone(""); setNewAge(""); setNewGender(""); setNewDivisionId(""); setNewDeptId("");
+      setNewName(""); setNewPhone(""); setNewAge(""); setNewGender(""); setNewDivisionId(""); setNewDeptId(""); setNewExperience(""); setNewExamScore("");
       setShowAdd(false);
       fetchData();
     }
@@ -508,17 +563,28 @@ const HNManageView = () => {
     fetchData();
   };
 
+  const filtered = nurses.filter((n) => {
+    const q = search.toLowerCase();
+    return n.name.toLowerCase().includes(q) || n.phone.includes(q);
+  });
+
   if (loading) {
     return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-foreground">Manage Nurses</h2>
-        <Button variant="pink" size="sm" onClick={() => setShowAdd(!showAdd)}>
-          <UserPlus size={16} className="mr-1" /> Add Nurse
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input placeholder="Search nurses..." className="pl-10 w-48 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <Button variant="pink" size="sm" onClick={() => setShowAdd(!showAdd)}>
+            <UserPlus size={16} className="mr-1" /> Add Nurse
+          </Button>
+        </div>
       </div>
 
       {showAdd && (
@@ -551,6 +617,8 @@ const HNManageView = () => {
                 {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
+            <div className="space-y-2"><Label>Experience (years)</Label><Input type="number" placeholder="0" value={newExperience} onChange={(e) => setNewExperience(e.target.value)} /></div>
+            <div className="space-y-2"><Label>Exam Score (%)</Label><Input type="number" placeholder="0-100" value={newExamScore} onChange={(e) => setNewExamScore(e.target.value)} /></div>
           </div>
           <Button variant="hero" className="mt-4" onClick={handleAddNurse} disabled={saving}>
             {saving && <Loader2 size={16} className="mr-1 animate-spin" />}
@@ -559,10 +627,10 @@ const HNManageView = () => {
         </div>
       )}
 
-      {nurses.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="rounded-xl bg-card p-12 text-center shadow-card">
           <Users className="mx-auto h-10 w-10 text-muted-foreground/30" />
-          <p className="mt-4 text-sm text-muted-foreground">No active nurses. Add a nurse above to get started.</p>
+          <p className="mt-4 text-sm text-muted-foreground">{search ? "No nurses match your search." : "No active nurses. Add a nurse above to get started."}</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl bg-card shadow-card">
@@ -573,16 +641,18 @@ const HNManageView = () => {
                 <th className="px-4 py-3 text-left font-semibold text-foreground">Division</th>
                 <th className="px-4 py-3 text-left font-semibold text-foreground">Department</th>
                 <th className="px-4 py-3 text-left font-semibold text-foreground">Phone</th>
+                <th className="px-4 py-3 text-left font-semibold text-foreground">Exp</th>
                 <th className="px-4 py-3 text-left font-semibold text-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {nurses.map((n) => (
+              {filtered.map((n) => (
                 <tr key={n.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 font-medium text-foreground">{n.name}</td>
                   <td className="px-4 py-3 text-muted-foreground">{n.divisions?.name || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{n.departments?.name || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{n.phone}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{n.experience_years || 0} yrs</td>
                   <td className="px-4 py-3">
                     <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleRemove(n)}>
                       <Trash2 size={14} />
@@ -592,6 +662,9 @@ const HNManageView = () => {
               ))}
             </tbody>
           </table>
+          <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+            {filtered.length} active nurses
+          </div>
         </div>
       )}
     </div>
