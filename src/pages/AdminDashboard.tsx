@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 
-type Tab = "overview" | "nurses" | "schedules" | "swaps" | "logs";
+type Tab = "overview" | "nurses" | "head_nurses" | "schedules" | "swaps" | "logs";
 
 const SHIFT_LABELS: Record<string, string> = {
   morning: "Morning (6AM-2PM)",
