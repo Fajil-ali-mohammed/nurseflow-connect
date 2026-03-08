@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import {
   Calendar, Clock, ArrowLeftRight, Bell, User, LogOut, Menu, X,
-  Activity, Building2, ChevronRight, Loader2
+  Activity, Building2, ChevronRight, Loader2, BellRing
 } from "lucide-react";
 import logo from "@/assets/logo.png";
+import { subscribeToPush, isPushSupported } from "@/lib/pushNotifications";
 
 const SHIFT_LABELS: Record<string, string> = {
   morning: "Morning (6AM-2PM)",
@@ -54,6 +55,32 @@ const NurseDashboard = () => {
   const [nurseProfile, setNurseProfile] = useState<NurseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showPushBanner, setShowPushBanner] = useState(false);
+
+  // Prompt for push notifications
+  useEffect(() => {
+    if (!user) return;
+    if (!isPushSupported()) return;
+    if (Notification.permission === "granted") return;
+    if (localStorage.getItem("push_dismissed")) return;
+    setShowPushBanner(true);
+  }, [user]);
+
+  const handleEnablePush = async () => {
+    if (!user) return;
+    const success = await subscribeToPush(user.id);
+    if (success) {
+      toast({ title: "Notifications Enabled", description: "You'll receive duty reminders on this device." });
+    } else {
+      toast({ title: "Could not enable", description: "Please allow notifications in your browser settings.", variant: "destructive" });
+    }
+    setShowPushBanner(false);
+  };
+
+  const handleDismissPush = () => {
+    localStorage.setItem("push_dismissed", "true");
+    setShowPushBanner(false);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -181,6 +208,20 @@ const NurseDashboard = () => {
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">{initials}</div>
           </div>
         </header>
+
+        {showPushBanner && (
+          <div className="mx-4 mt-4 flex items-center gap-3 rounded-xl bg-primary/10 border border-primary/20 p-4 md:mx-6">
+            <BellRing className="h-5 w-5 text-primary shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">Enable Push Notifications</p>
+              <p className="text-xs text-muted-foreground">Get duty reminders 5h, 3h, and 1h before your shifts.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={handleDismissPush} className="text-xs">Dismiss</Button>
+              <Button size="sm" onClick={handleEnablePush} className="text-xs">Enable</Button>
+            </div>
+          </div>
+        )}
 
         <div className="p-4 md:p-6">
           {activeTab === "schedule" && nurseProfile && <ScheduleView nurseId={nurseProfile.id} deptName={nurseProfile.departments?.name || "Unassigned"} />}
