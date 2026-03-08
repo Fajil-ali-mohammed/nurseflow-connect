@@ -3,22 +3,41 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, User, Lock } from "lucide-react";
+import { ArrowLeft, User, Lock, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import logo from "@/assets/logo.png";
 
 interface RoleLoginProps {
   role: "Head Nurse" | "Admin";
   dashboardPath: string;
+  emailDomain: string;
 }
 
-const RoleLogin = ({ role, dashboardPath }: RoleLoginProps) => {
+const RoleLogin = ({ role, dashboardPath, emailDomain }: RoleLoginProps) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate(dashboardPath);
+    setLoading(true);
+
+    try {
+      const email = `${username}@${emailDomain}`;
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      navigate(dashboardPath);
+    } catch (error: any) {
+      toast({
+        title: "Login Failed",
+        description: error.message || "Invalid credentials",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,7 +68,10 @@ const RoleLogin = ({ role, dashboardPath }: RoleLoginProps) => {
                 <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" className="pl-10" required />
               </div>
             </div>
-            <Button type="submit" variant="hero" className="w-full" size="lg">Sign In</Button>
+            <Button type="submit" variant="hero" className="w-full" size="lg" disabled={loading}>
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Sign In
+            </Button>
           </form>
         </div>
       </div>
@@ -57,5 +79,5 @@ const RoleLogin = ({ role, dashboardPath }: RoleLoginProps) => {
   );
 };
 
-export const HeadNurseLogin = () => <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" />;
-export const AdminLogin = () => <RoleLogin role="Admin" dashboardPath="/admin-dashboard" />;
+export const HeadNurseLogin = () => <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" emailDomain="headnurse.local" />;
+export const AdminLogin = () => <RoleLogin role="Admin" dashboardPath="/admin-dashboard" emailDomain="admin.local" />;

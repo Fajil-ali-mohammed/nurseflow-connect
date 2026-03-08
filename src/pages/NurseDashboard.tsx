@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +28,13 @@ const notifications = [
 const NurseDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"schedule" | "swap" | "notifications" | "profile">("schedule");
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -62,11 +70,9 @@ const NurseDashboard = () => {
           </nav>
 
           <div className="border-t p-3">
-            <Link to="/">
-              <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted">
-                <LogOut size={18} /> Sign Out
-              </button>
-            </Link>
+            <button onClick={handleSignOut} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted">
+              <LogOut size={18} /> Sign Out
+            </button>
           </div>
         </div>
       </aside>

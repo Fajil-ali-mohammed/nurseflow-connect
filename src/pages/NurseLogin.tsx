@@ -3,7 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Phone, Lock, UserPlus } from "lucide-react";
+import { ArrowLeft, Phone, Lock, UserPlus, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 import logo from "@/assets/logo.png";
 
 const NurseLogin = () => {
@@ -11,12 +13,77 @@ const NurseLogin = () => {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Demo: navigate to nurse dashboard
-    navigate("/nurse-dashboard");
+    setLoading(true);
+
+    try {
+      if (isRegister) {
+        // Check if phone was pre-entered by head nurse
+        const { data: phoneExists, error: checkError } = await supabase.rpc(
+          "check_nurse_phone_exists",
+          { phone_number: phone }
+        );
+
+        if (checkError) throw checkError;
+        if (!phoneExists) {
+          toast({
+            title: "Registration Failed",
+            description: "Your phone number was not found in the system. Please contact your Head Nurse to be added first.",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Sign up using phone as email identifier
+        const email = `${phone.replace(/[^0-9]/g, "")}@nurse.local`;
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: name, phone, role: "nurse" } },
+        });
+
+        if (signUpError) throw signUpError;
+
+        if (signUpData.user) {
+          // Assign nurse role
+          const { error: roleError } = await supabase.from("user_roles").insert({
+            user_id: signUpData.user.id,
+            role: "nurse" as const,
+          });
+          if (roleError) throw roleError;
+
+          // Link nurse record to this user
+          const { error: linkError } = await supabase
+            .from("nurses")
+            .update({ user_id: signUpData.user.id, name })
+            .eq("phone", phone)
+            .is("user_id", null);
+          if (linkError) throw linkError;
+
+          toast({ title: "Registration Successful", description: "Welcome to Nurses Connect!" });
+          navigate("/nurse-dashboard");
+        }
+      } else {
+        // Login
+        const email = `${phone.replace(/[^0-9]/g, "")}@nurse.local`;
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        navigate("/nurse-dashboard");
+      }
+    } catch (error: any) {
+      toast({
+        title: isRegister ? "Registration Failed" : "Login Failed",
+        description: error.message || "An error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -53,7 +120,8 @@ const NurseLogin = () => {
                 <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="pl-10" required />
               </div>
             </div>
-            <Button type="submit" variant="hero" className="w-full" size="lg">
+            <Button type="submit" variant="hero" className="w-full" size="lg" disabled={loading}>
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isRegister ? "Register" : "Sign In"}
             </Button>
           </form>

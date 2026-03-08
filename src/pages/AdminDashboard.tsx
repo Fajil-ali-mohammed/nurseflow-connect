@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard, Users, Calendar, ArrowLeftRight, Activity, LogOut,
@@ -12,6 +13,13 @@ type Tab = "overview" | "nurses" | "schedules" | "swaps" | "logs";
 const AdminDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   const tabs = [
     { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
@@ -42,7 +50,7 @@ const AdminDashboard = () => {
             ))}
           </nav>
           <div className="border-t p-3">
-            <Link to="/"><button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted"><LogOut size={18} /> Sign Out</button></Link>
+            <button onClick={handleSignOut} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted"><LogOut size={18} /> Sign Out</button>
           </div>
         </div>
       </aside>
