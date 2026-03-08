@@ -1,14 +1,42 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/hooks/use-toast";
 import {
   LayoutDashboard, Users, Calendar, ArrowLeftRight, Activity, LogOut,
-  Menu, X
+  Menu, X, Loader2, Search, Wand2, Check, XCircle
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 
 type Tab = "overview" | "nurses" | "schedules" | "swaps" | "logs";
+
+const SHIFT_LABELS: Record<string, string> = {
+  morning: "Morning (6AM-2PM)",
+  evening: "Evening (2PM-10PM)",
+  night: "Night (10PM-6AM)",
+};
+
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+function formatTimeAgo(ts: string) {
+  const diffMs = Date.now() - new Date(ts).getTime();
+  const diffH = Math.floor(diffMs / 3600000);
+  if (diffH < 1) return "Just now";
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD === 1) return "Yesterday";
+  return `${diffD}d ago`;
+}
 
 const AdminDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -16,10 +44,7 @@ const AdminDashboard = () => {
   const { signOut } = useAuth();
   const navigate = useNavigate();
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate("/");
-  };
+  const handleSignOut = async () => { await signOut(); navigate("/"); };
 
   const tabs = [
     { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
@@ -74,135 +99,422 @@ const AdminDashboard = () => {
   );
 };
 
-const AdminOverview = () => (
-  <div className="space-y-6 animate-fade-in">
-    <div className="grid gap-4 md:grid-cols-4">
-      {[
-        { label: "Total Nurses", value: "524", color: "bg-primary/10 text-primary" },
-        { label: "Active Shifts", value: "186", color: "bg-accent/20 text-accent" },
-        { label: "Pending Swaps", value: "12", color: "bg-destructive/10 text-destructive" },
-        { label: "Departments", value: "6", color: "bg-primary/10 text-primary" },
-      ].map((s) => (
-        <div key={s.label} className="rounded-xl bg-card p-5 shadow-card">
-          <p className="text-xs text-muted-foreground">{s.label}</p>
-          <p className="mt-1 text-3xl font-bold text-foreground">{s.value}</p>
-        </div>
-      ))}
-    </div>
+// ─── Overview ───────────────────────────────────────────────────
 
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="rounded-xl bg-card p-5 shadow-card">
-        <h3 className="text-sm font-bold text-foreground">Division Distribution</h3>
-        <div className="mt-4 space-y-3">
-          {["Division I", "Division II", "Division III", "Division IV"].map((d, i) => {
-            const pct = [30, 28, 22, 20][i];
-            return (
-              <div key={d}>
-                <div className="flex justify-between text-xs"><span className="text-muted-foreground">{d}</span><span className="font-bold text-foreground">{pct}%</span></div>
-                <div className="mt-1 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${pct}%` }} /></div>
-              </div>
-            );
-          })}
+const AdminOverview = () => {
+  const [stats, setStats] = useState({ nurses: 0, shifts: 0, pendingSwaps: 0, departments: 0 });
+  const [divisionDist, setDivisionDist] = useState<{ name: string; count: number }[]>([]);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      const [nursesRes, shiftsRes, swapsRes, deptsRes, divsRes, logsRes] = await Promise.all([
+        supabase.from("nurses").select("id", { count: "exact", head: true }).eq("is_active", true),
+        supabase.from("schedules").select("id", { count: "exact", head: true }).gte("duty_date", new Date().toISOString().split("T")[0]),
+        supabase.from("shift_swap_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("departments").select("id", { count: "exact", head: true }),
+        supabase.from("nurses").select("division_id, divisions:divisions(name)").eq("is_active", true),
+        supabase.from("activity_logs").select("*").order("created_at", { ascending: false }).limit(5),
+      ]);
+
+      setStats({
+        nurses: nursesRes.count || 0,
+        shifts: shiftsRes.count || 0,
+        pendingSwaps: swapsRes.count || 0,
+        departments: deptsRes.count || 0,
+      });
+
+      // Calculate division distribution
+      const divCounts: Record<string, { name: string; count: number }> = {};
+      for (const n of (divsRes.data || []) as any[]) {
+        const divName = n.divisions?.name || "Unassigned";
+        if (!divCounts[divName]) divCounts[divName] = { name: divName, count: 0 };
+        divCounts[divName].count++;
+      }
+      setDivisionDist(Object.values(divCounts).sort((a, b) => b.count - a.count));
+
+      setRecentLogs(logsRes.data || []);
+      setLoading(false);
+    };
+    fetchAll();
+  }, []);
+
+  if (loading) {
+    return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  }
+
+  const totalNurses = divisionDist.reduce((s, d) => s + d.count, 0) || 1;
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          { label: "Total Nurses", value: String(stats.nurses) },
+          { label: "Upcoming Shifts", value: String(stats.shifts) },
+          { label: "Pending Swaps", value: String(stats.pendingSwaps) },
+          { label: "Departments", value: String(stats.departments) },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl bg-card p-5 shadow-card">
+            <p className="text-xs text-muted-foreground">{s.label}</p>
+            <p className="mt-1 text-3xl font-bold text-foreground">{s.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl bg-card p-5 shadow-card">
+          <h3 className="text-sm font-bold text-foreground">Division Distribution</h3>
+          <div className="mt-4 space-y-3">
+            {divisionDist.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No nurses registered yet.</p>
+            ) : (
+              divisionDist.map((d) => {
+                const pct = Math.round((d.count / totalNurses) * 100);
+                return (
+                  <div key={d.name}>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{d.name}</span>
+                      <span className="font-bold text-foreground">{d.count} ({pct}%)</span>
+                    </div>
+                    <div className="mt-1 h-2 rounded-full bg-muted">
+                      <div className="h-2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        <div className="rounded-xl bg-card p-5 shadow-card">
+          <h3 className="text-sm font-bold text-foreground">Recent Activity</h3>
+          <div className="mt-4 space-y-3">
+            {recentLogs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No activity yet.</p>
+            ) : (
+              recentLogs.map((a) => (
+                <div key={a.id} className="flex items-center justify-between rounded-lg bg-background p-3">
+                  <p className="text-xs text-foreground">{a.description || a.action}</p>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">{formatTimeAgo(a.created_at)}</span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
-      <div className="rounded-xl bg-card p-5 shadow-card">
-        <h3 className="text-sm font-bold text-foreground">Recent Activity</h3>
-        <div className="mt-4 space-y-3">
-          {[
-            { text: "New nurse registered: Anna Martinez", time: "2h ago" },
-            { text: "Swap approved: Sarah ↔ Emily", time: "5h ago" },
-            { text: "Schedule generated for Week 11", time: "1d ago" },
-            { text: "Nurse removed: Tom Wilson (Resigned)", time: "2d ago" },
-          ].map((a, i) => (
-            <div key={i} className="flex items-center justify-between rounded-lg bg-background p-3">
-              <p className="text-xs text-foreground">{a.text}</p>
-              <span className="text-xs text-muted-foreground">{a.time}</span>
+    </div>
+  );
+};
+
+// ─── Nurses ─────────────────────────────────────────────────────
+
+const AdminNurses = () => {
+  const [nurses, setNurses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const fetch = async () => {
+      const { data } = await supabase
+        .from("nurses")
+        .select("id, name, phone, is_active, divisions:divisions(name), departments:departments(name)")
+        .order("name");
+      setNurses(data || []);
+      setLoading(false);
+    };
+    fetch();
+  }, []);
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  const filtered = nurses.filter((n) => {
+    const q = search.toLowerCase();
+    return n.name.toLowerCase().includes(q) || (n.divisions?.name || "").toLowerCase().includes(q) || (n.departments?.name || "").toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="animate-fade-in space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-foreground">All Nurses ({nurses.length})</h2>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Search..." className="pl-10 w-60 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="rounded-xl bg-card p-12 text-center shadow-card">
+          <Users className="mx-auto h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-4 text-sm text-muted-foreground">No nurses found.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl bg-card shadow-card">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50">
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Name</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Division</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Department</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Phone</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Status</th>
+            </tr></thead>
+            <tbody className="divide-y">
+              {filtered.map((n) => (
+                <tr key={n.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium text-foreground">{n.name}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{n.divisions?.name || "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{n.departments?.name || "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{n.phone}</td>
+                  <td className="px-4 py-3">
+                    <Badge className={n.is_active ? "bg-primary/10 text-primary border-0" : "bg-destructive/10 text-destructive border-0"}>
+                      {n.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Schedules ──────────────────────────────────────────────────
+
+const AdminSchedules = () => {
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const now = new Date();
+  const [selectedWeek, setSelectedWeek] = useState(getISOWeek(now));
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+  const fetchSchedule = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("schedules")
+      .select("id, duty_date, shift_type, nurse:nurses(name), department:departments(name)")
+      .eq("week_number", selectedWeek)
+      .eq("year", selectedYear)
+      .order("duty_date")
+      .order("shift_type");
+    setSchedules((data as any[]) || []);
+    setLoading(false);
+  }, [selectedWeek, selectedYear]);
+
+  useEffect(() => { fetchSchedule(); }, [fetchSchedule]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/generate-schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+        body: JSON.stringify({ week_number: selectedWeek, year: selectedYear }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed");
+      toast({ title: "Schedule Generated", description: `${result.stats.total_entries} entries for ${result.stats.nurses_scheduled} nurses.` });
+      await fetchSchedule();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const filtered = schedules.filter((s) => {
+    const q = search.toLowerCase();
+    return (s.nurse?.name || "").toLowerCase().includes(q) || (s.department?.name || "").toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-foreground">Schedules</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="number" min={1} max={53} value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))} className="w-20 h-9" />
+          <Input type="number" min={2024} max={2030} value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="w-24 h-9" />
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input placeholder="Search..." className="pl-10 w-48 h-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <Button variant="pink" size="sm" onClick={handleGenerate} disabled={generating}>
+            {generating ? <Loader2 size={16} className="mr-1 animate-spin" /> : <Wand2 size={16} className="mr-1" />}
+            {generating ? "Generating..." : "Auto-Generate"}
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl bg-card p-12 text-center shadow-card">
+          <Calendar className="mx-auto h-12 w-12 text-muted-foreground/30" />
+          <p className="mt-4 text-sm text-muted-foreground">No schedule for Week {selectedWeek}, {selectedYear}.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl bg-card shadow-card">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50">
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Nurse</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Department</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Shift</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Date</th>
+            </tr></thead>
+            <tbody className="divide-y">
+              {filtered.map((s) => (
+                <tr key={s.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium text-foreground">{s.nurse?.name || "Unknown"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{s.department?.name || "Unknown"}</td>
+                  <td className="px-4 py-3">
+                    <Badge className={s.shift_type === "morning" ? "bg-primary/10 text-primary border-0" : s.shift_type === "evening" ? "bg-accent/20 text-accent border-0" : "bg-muted text-foreground border-0"}>
+                      {SHIFT_LABELS[s.shift_type] || s.shift_type}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(s.duty_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+            {filtered.length} entries • {new Set(filtered.map((s: any) => s.nurse?.name)).size} nurses
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Swaps ──────────────────────────────────────────────────────
+
+const AdminSwaps = () => {
+  const [swaps, setSwaps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      const { data } = await supabase
+        .from("shift_swap_requests")
+        .select(`
+          id, status, created_at,
+          requester:nurses!shift_swap_requests_requester_nurse_id_fkey(name),
+          target:nurses!shift_swap_requests_target_nurse_id_fkey(name),
+          requester_schedule:schedules!shift_swap_requests_requester_schedule_id_fkey(duty_date, shift_type, department:departments(name)),
+          target_schedule:schedules!shift_swap_requests_target_schedule_id_fkey(duty_date, shift_type, department:departments(name))
+        `)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      setSwaps(data || []);
+      setLoading(false);
+    };
+    fetch();
+  }, []);
+
+  const handleAction = async (id: string, status: "approved" | "rejected") => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const { error } = await supabase.from("shift_swap_requests").update({ status, reviewed_by: sessionData.session?.user?.id }).eq("id", id);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: `Swap ${status}` });
+      setSwaps((prev) => prev.map((s) => (s.id === id ? { ...s, status } : s)));
+    }
+  };
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="animate-fade-in space-y-4">
+      <h2 className="text-lg font-bold text-foreground">All Swap Requests</h2>
+      {swaps.length === 0 ? (
+        <div className="rounded-xl bg-card p-12 text-center shadow-card">
+          <ArrowLeftRight className="mx-auto h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-4 text-sm text-muted-foreground">No swap requests.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {swaps.map((s) => (
+            <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card p-4 shadow-card">
+              <div>
+                <p className="text-sm font-medium text-foreground">{s.requester?.name || "?"} ↔ {s.target?.name || "?"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {s.requester_schedule?.shift_type} — {s.requester_schedule?.department?.name} ⟷ {s.target_schedule?.shift_type} — {s.target_schedule?.department?.name}
+                  {" • "}{formatTimeAgo(s.created_at)}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {s.status === "pending" ? (
+                  <>
+                    <Button variant="hero" size="sm" onClick={() => handleAction(s.id, "approved")}><Check size={14} className="mr-1" /> Approve</Button>
+                    <Button variant="outline" size="sm" onClick={() => handleAction(s.id, "rejected")}><XCircle size={14} className="mr-1" /> Reject</Button>
+                  </>
+                ) : (
+                  <Badge className={s.status === "approved" ? "bg-primary/10 text-primary border-0" : "bg-destructive/10 text-destructive border-0"}>
+                    {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
+                  </Badge>
+                )}
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
-const AdminNurses = () => (
-  <div className="animate-fade-in">
-    <h2 className="text-lg font-bold text-foreground mb-4">All Nurses</h2>
-    <div className="overflow-x-auto rounded-xl bg-card shadow-card">
-      <table className="w-full text-sm">
-        <thead><tr className="border-b bg-muted/50">
-          <th className="px-4 py-3 text-left font-semibold">Name</th>
-          <th className="px-4 py-3 text-left font-semibold">Division</th>
-          <th className="px-4 py-3 text-left font-semibold">Department</th>
-          <th className="px-4 py-3 text-left font-semibold">Status</th>
-        </tr></thead>
-        <tbody className="divide-y">
-          {["Sarah Johnson", "Emily Watson", "Michael Lee", "Jessica Brown", "David Kim"].map((name, i) => (
-            <tr key={name} className="hover:bg-muted/30">
-              <td className="px-4 py-3 font-medium text-foreground">{name}</td>
-              <td className="px-4 py-3 text-muted-foreground">Division {["II", "II", "II", "I", "III"][i]}</td>
-              <td className="px-4 py-3 text-muted-foreground">{["ICU", "General Ward", "Pediatrics", "Emergency", "OT"][i]}</td>
-              <td className="px-4 py-3"><Badge className="bg-primary/10 text-primary border-0">Active</Badge></td>
-            </tr>
+// ─── Logs ───────────────────────────────────────────────────────
+
+const AdminLogs = () => {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      const { data } = await supabase
+        .from("activity_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      setLogs(data || []);
+      setLoading(false);
+    };
+    fetch();
+  }, []);
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="animate-fade-in space-y-4">
+      <h2 className="text-lg font-bold text-foreground">Activity Logs</h2>
+      {logs.length === 0 ? (
+        <div className="rounded-xl bg-card p-12 text-center shadow-card">
+          <Activity className="mx-auto h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-4 text-sm text-muted-foreground">No activity logs yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {logs.map((log) => (
+            <div key={log.id} className="flex items-center justify-between rounded-lg bg-card p-4 shadow-card">
+              <div>
+                <p className="text-sm font-medium text-foreground">{log.description || log.action}</p>
+                <p className="text-xs text-muted-foreground">Action: {log.action}</p>
+              </div>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                {new Date(log.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+              </span>
+            </div>
           ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-);
-
-const AdminSchedules = () => (
-  <div className="animate-fade-in">
-    <h2 className="text-lg font-bold text-foreground mb-4">All Schedules</h2>
-    <p className="text-sm text-muted-foreground">Full schedule management view — same as Head Nurse schedule with full edit access.</p>
-    <div className="mt-4 rounded-xl bg-card p-8 text-center shadow-card">
-      <Calendar className="mx-auto h-12 w-12 text-muted-foreground/30" />
-      <p className="mt-4 text-sm text-muted-foreground">Schedule management mirrors Head Nurse view with admin-level access.</p>
-    </div>
-  </div>
-);
-
-const AdminSwaps = () => (
-  <div className="animate-fade-in">
-    <h2 className="text-lg font-bold text-foreground mb-4">All Swap Requests</h2>
-    <div className="space-y-3">
-      {[
-        { from: "Sarah Johnson", to: "Emily Watson", status: "Approved" },
-        { from: "Michael Lee", to: "David Kim", status: "Pending" },
-        { from: "Jessica Brown", to: "Sarah Johnson", status: "Rejected" },
-      ].map((s, i) => (
-        <div key={i} className="flex items-center justify-between rounded-xl bg-card p-4 shadow-card">
-          <p className="text-sm font-medium text-foreground">{s.from} ↔ {s.to}</p>
-          <Badge className={s.status === "Approved" ? "bg-primary/10 text-primary border-0" : s.status === "Pending" ? "bg-accent/20 text-accent border-0" : "bg-destructive/10 text-destructive border-0"}>
-            {s.status}
-          </Badge>
         </div>
-      ))}
+      )}
     </div>
-  </div>
-);
-
-const AdminLogs = () => (
-  <div className="animate-fade-in">
-    <h2 className="text-lg font-bold text-foreground mb-4">Activity Logs</h2>
-    <div className="space-y-2">
-      {[
-        { action: "Schedule modified by Head Nurse", user: "HN-Admin", time: "Mar 8, 2:30 PM" },
-        { action: "Swap request approved", user: "HN-Admin", time: "Mar 8, 10:15 AM" },
-        { action: "New nurse added: Anna Martinez", user: "HN-Admin", time: "Mar 7, 4:00 PM" },
-        { action: "Nurse removed: Tom Wilson", user: "Admin", time: "Mar 6, 9:00 AM" },
-        { action: "Weekly schedule auto-generated", user: "System", time: "Mar 5, 12:00 AM" },
-      ].map((log, i) => (
-        <div key={i} className="flex items-center justify-between rounded-lg bg-card p-4 shadow-card">
-          <div>
-            <p className="text-sm font-medium text-foreground">{log.action}</p>
-            <p className="text-xs text-muted-foreground">By: {log.user}</p>
-          </div>
-          <span className="text-xs text-muted-foreground">{log.time}</span>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 export default AdminDashboard;
