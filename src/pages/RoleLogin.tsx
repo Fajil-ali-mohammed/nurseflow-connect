@@ -88,12 +88,5 @@ const RoleLogin = ({ role, dashboardPath, emailDomain }: RoleLoginProps) => {
   );
 };
 
-export const HeadNurseLogin = forwardRef<HTMLDivElement>((_props, _ref) => (
-  <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" emailDomain="headnurse.local" />
-));
-HeadNurseLogin.displayName = "HeadNurseLogin";
-
-export const AdminLogin = forwardRef<HTMLDivElement>((_props, _ref) => (
-  <RoleLogin role="Admin" dashboardPath="/admin-dashboard" emailDomain="admin.local" />
-));
-AdminLogin.displayName = "AdminLogin";
+export const HeadNurseLogin = () => <RoleLogin role="Head Nurse" dashboardPath="/headnurse-dashboard" emailDomain="headnurse.local" />;
+export const AdminLogin = () => <RoleLogin role="Admin" dashboardPath="/admin-dashboard" emailDomain="admin.local" />;
