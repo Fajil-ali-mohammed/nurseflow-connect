@@ -38,6 +38,13 @@ const swapRequests = [
 const HeadNurseDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("schedule");
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   const tabs = [
     { key: "schedule" as const, icon: Calendar, label: "Weekly Schedule" },
