@@ -418,13 +418,21 @@ const AdminSwaps = () => {
   }, []);
 
   const handleAction = async (id: string, status: "approved" | "rejected") => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const { error } = await supabase.from("shift_swap_requests").update({ status, reviewed_by: sessionData.session?.user?.id }).eq("id", id);
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } else {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/handle-swap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+        body: JSON.stringify({ swap_id: id, action: status }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed");
       toast({ title: `Swap ${status}` });
       setSwaps((prev) => prev.map((s) => (s.id === id ? { ...s, status } : s)));
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     }
   };
 

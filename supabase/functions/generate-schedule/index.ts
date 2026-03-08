@@ -237,6 +237,29 @@ serve(async (req) => {
       description: `Generated schedule for week ${week_number} of ${year}: ${stats.total_entries} entries for ${stats.nurses_scheduled} nurses`,
     });
 
+    // Send notifications to all scheduled nurses
+    const scheduledNurseIds = [...new Set(scheduleEntries.map((e) => e.nurse_id))];
+    // Look up user_ids for these nurse records
+    const { data: nurseUsers } = await supabase
+      .from("nurses")
+      .select("id, user_id")
+      .in("id", scheduledNurseIds)
+      .not("user_id", "is", null);
+
+    if (nurseUsers && nurseUsers.length > 0) {
+      const notifications = nurseUsers.map((n: any) => ({
+        user_id: n.user_id,
+        title: "New Schedule Published",
+        message: `Your schedule for week ${week_number} of ${year} has been published. Check your dashboard for details.`,
+        notification_type: "schedule_published",
+      }));
+
+      // Insert in batches
+      for (let i = 0; i < notifications.length; i += 500) {
+        await supabase.from("notifications").insert(notifications.slice(i, i + 500));
+      }
+    }
+
     return new Response(
       JSON.stringify({ success: true, stats }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

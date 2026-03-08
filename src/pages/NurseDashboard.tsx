@@ -78,6 +78,31 @@ const NurseDashboard = () => {
 
     fetchProfile();
     fetchUnread();
+
+    // Realtime subscription for notifications
+    const channel = supabase
+      .channel('nurse-notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          setUnreadCount((c) => c + 1);
+          toast({
+            title: (payload.new as any).title || "New Notification",
+            description: (payload.new as any).message || "",
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handleSignOut = async () => {
