@@ -98,7 +98,7 @@ serve(async (req) => {
         const title = `⏰ Duty Reminder - ${timeLabel} left`;
         const message = `Hi ${nurse.name}, your ${shiftLabel} shift at ${deptName} on ${schedule.duty_date} starts in ${timeLabel}. Please prepare accordingly.`;
 
-        // Insert notification
+        // Insert in-app notification
         const { error: notifErr } = await supabase.from("notifications").insert({
           user_id: nurse.user_id,
           title,
@@ -109,6 +109,23 @@ serve(async (req) => {
         if (notifErr) {
           console.error(`Failed to send reminder for schedule ${schedule.id}:`, notifErr);
           continue;
+        }
+
+        // Send web push notifications to all subscribed devices
+        const { data: subscriptions } = await supabase
+          .from("push_subscriptions")
+          .select("endpoint, p256dh, auth")
+          .eq("user_id", nurse.user_id);
+
+        if (subscriptions && subscriptions.length > 0) {
+          for (const sub of subscriptions) {
+            try {
+              // Use Web Push protocol
+              await sendWebPush(sub, { title, body: message, icon: "/favicon.ico", tag: `duty-${reminder.type}-${schedule.id}` });
+            } catch (pushErr) {
+              console.error(`Push failed for endpoint ${sub.endpoint}:`, pushErr);
+            }
+          }
         }
 
         // Record that we sent this reminder
