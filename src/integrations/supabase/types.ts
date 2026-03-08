@@ -86,6 +86,35 @@ export type Database = {
         }
         Relationships: []
       }
+      duty_reminders: {
+        Row: {
+          id: string
+          reminder_type: string
+          schedule_id: string
+          sent_at: string
+        }
+        Insert: {
+          id?: string
+          reminder_type: string
+          schedule_id: string
+          sent_at?: string
+        }
+        Update: {
+          id?: string
+          reminder_type?: string
+          schedule_id?: string
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "duty_reminders_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       head_nurses: {
         Row: {
           created_at: string
