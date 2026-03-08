@@ -151,3 +151,28 @@ serve(async (req) => {
     );
   }
 });
+
+/**
+ * Send a web push notification using the Web Push protocol.
+ * This is a simplified implementation that sends the payload to the push endpoint.
+ */
+async function sendWebPush(
+  subscription: { endpoint: string; p256dh: string; auth: string },
+  payload: { title: string; body: string; icon?: string; tag?: string }
+): Promise<void> {
+  const response = await fetch(subscription.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      TTL: "86400",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Push send failed [${response.status}]: ${text}`);
+  } else {
+    await response.text(); // consume body
+  }
+}
