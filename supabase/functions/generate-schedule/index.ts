@@ -26,20 +26,7 @@ type ShiftType = "morning" | "evening" | "night";
 
 const SHIFT_TYPES: ShiftType[] = ["morning", "evening", "night"];
 const MAX_SHIFTS_PER_WEEK = 5;
-const MIN_SHIFTS_PER_WEEK = 4;
-
-/**
- * Auto-scheduling algorithm:
- *
- * 1. Fetch all active nurses and departments
- * 2. For each day of the target week (Mon–Sun):
- *    a. For each department, assign nurses to morning/evening/night shifts
- *    b. Prioritize nurses with the fewest shifts so far (workload balancing)
- *    c. Avoid assigning a nurse to a department in their previous_departments list (rotation)
- *    d. Avoid scheduling the same nurse for >1 shift per day
- *    e. Cap total shifts at MAX_SHIFTS_PER_WEEK per nurse
- * 3. Write all schedule entries atomically
- */
+const LEAVE_DAYS_PER_WEEK = 2; // Each nurse gets 2 leave days per week
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -51,7 +38,6 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    // Validate caller via auth header
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) throw new Error("Missing authorization");
 
@@ -62,7 +48,6 @@ serve(async (req) => {
     } = await supabase.auth.getUser(token);
     if (authError || !user) throw new Error("Unauthorized");
 
-    // Check role
     const { data: roleData } = await supabase
       .from("user_roles")
       .select("role")
@@ -76,14 +61,28 @@ serve(async (req) => {
     const { week_number, year } = await req.json();
     if (!week_number || !year) throw new Error("week_number and year are required");
 
-    // Delete existing schedules for this week (regenerate)
+    // Delete existing schedules and leaves for this week (regenerate)
+    const monday = getDateOfISOWeek(week_number, year);
+    const weekDays: string[] = [];
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(monday);
+      day.setDate(day.getDate() + d);
+      weekDays.push(day.toISOString().split("T")[0]);
+    }
+
     await supabase
       .from("schedules")
       .delete()
       .eq("week_number", week_number)
       .eq("year", year);
 
-    // Fetch active nurses
+    // Clear auto-generated leaves for this week
+    await supabase
+      .from("nurse_leaves")
+      .delete()
+      .in("leave_date", weekDays);
+
+    // Fetch active nurses and departments
     const { data: nurses, error: nursesErr } = await supabase
       .from("nurses")
       .select("id, name, division_id, current_department_id, previous_departments, experience_years, is_active")
@@ -97,7 +96,6 @@ serve(async (req) => {
       );
     }
 
-    // Fetch departments
     const { data: departments, error: deptErr } = await supabase
       .from("departments")
       .select("id, name");
@@ -107,18 +105,79 @@ serve(async (req) => {
       throw new Error("No departments found");
     }
 
-    // Calculate the Monday of the given ISO week
-    const monday = getDateOfISOWeek(week_number, year);
-    const weekDays: string[] = [];
-    for (let d = 0; d < 7; d++) {
-      const day = new Date(monday);
-      day.setDate(day.getDate() + d);
-      weekDays.push(day.toISOString().split("T")[0]);
+    // Fetch any manually pre-set leaves for this week
+    const { data: existingLeaves } = await supabase
+      .from("nurse_leaves")
+      .select("nurse_id, leave_date")
+      .in("leave_date", weekDays);
+
+    // Build a set of pre-existing leaves: nurseId -> Set of dates
+    const presetLeaves: Record<string, Set<string>> = {};
+    for (const n of nurses) {
+      presetLeaves[n.id] = new Set();
+    }
+    if (existingLeaves) {
+      for (const l of existingLeaves) {
+        if (presetLeaves[l.nurse_id]) {
+          presetLeaves[l.nurse_id].add(l.leave_date);
+        }
+      }
     }
 
-    // Track shift counts per nurse for fairness
+    // Assign leave days for each nurse (spread out across the week)
+    // Each nurse gets LEAVE_DAYS_PER_WEEK days off, distributed so not all nurses are off on the same day
+    const nurseLeaveDays: Record<string, Set<string>> = {};
+    const dayLeaveCount: Record<string, number> = {};
+    for (const d of weekDays) {
+      dayLeaveCount[d] = 0;
+    }
+
+    for (const n of nurses) {
+      nurseLeaveDays[n.id] = new Set(presetLeaves[n.id]);
+      // Count preset leaves toward daily totals
+      for (const d of presetLeaves[n.id]) {
+        dayLeaveCount[d] = (dayLeaveCount[d] || 0) + 1;
+      }
+    }
+
+    // Assign remaining leave days to nurses who don't have enough yet
+    const newLeaveRecords: Array<{ nurse_id: string; leave_date: string; reason: string; approved_by: string }> = [];
+
+    for (const nurse of nurses) {
+      const currentLeaves = nurseLeaveDays[nurse.id].size;
+      const needed = LEAVE_DAYS_PER_WEEK - currentLeaves;
+
+      if (needed <= 0) continue;
+
+      // Pick days with fewest nurses on leave (to spread leaves evenly)
+      const availableDays = weekDays
+        .filter((d) => !nurseLeaveDays[nurse.id].has(d))
+        .sort((a, b) => dayLeaveCount[a] - dayLeaveCount[b]);
+
+      for (let i = 0; i < needed && i < availableDays.length; i++) {
+        const leaveDay = availableDays[i];
+        nurseLeaveDays[nurse.id].add(leaveDay);
+        dayLeaveCount[leaveDay]++;
+        newLeaveRecords.push({
+          nurse_id: nurse.id,
+          leave_date: leaveDay,
+          reason: "Scheduled leave (auto-generated)",
+          approved_by: user.id,
+        });
+      }
+    }
+
+    // Insert auto-generated leaves
+    if (newLeaveRecords.length > 0) {
+      for (let i = 0; i < newLeaveRecords.length; i += 500) {
+        const batch = newLeaveRecords.slice(i, i + 500);
+        await supabase.from("nurse_leaves").insert(batch);
+      }
+    }
+
+    // Now generate schedule — only assign nurses on days they are NOT on leave
     const nurseShiftCount: Record<string, number> = {};
-    const nurseDailyAssigned: Record<string, Set<string>> = {}; // nurseId -> Set of dates
+    const nurseDailyAssigned: Record<string, Set<string>> = {};
     const nurseShiftTypeCount: Record<string, Record<ShiftType, number>> = {};
 
     for (const n of nurses) {
@@ -137,20 +196,18 @@ serve(async (req) => {
       created_by: string;
     }> = [];
 
-    // How many nurses per shift per department
-    // Scale based on available nurses: at least 1 per dept/shift
     const nursesPerShiftPerDept = Math.max(
       1,
       Math.floor(nurses.length / (departments.length * SHIFT_TYPES.length * 2))
     );
 
-    // For each day, for each department, for each shift type
     for (const date of weekDays) {
       for (const dept of departments) {
         for (const shiftType of SHIFT_TYPES) {
-          // Find eligible nurses sorted by fairness criteria
           const eligible = nurses
             .filter((n) => {
+              // Skip nurses on leave this day
+              if (nurseLeaveDays[n.id].has(date)) return false;
               // Not already assigned today
               if (nurseDailyAssigned[n.id].has(date)) return false;
               // Not over max shifts
@@ -158,22 +215,18 @@ serve(async (req) => {
               return true;
             })
             .sort((a, b) => {
-              // Primary: fewest total shifts first (workload balance)
               const shiftDiff = nurseShiftCount[a.id] - nurseShiftCount[b.id];
               if (shiftDiff !== 0) return shiftDiff;
 
-              // Secondary: fewest of this shift type (variety)
               const typeDiff =
                 nurseShiftTypeCount[a.id][shiftType] -
                 nurseShiftTypeCount[b.id][shiftType];
               if (typeDiff !== 0) return typeDiff;
 
-              // Tertiary: prefer nurses NOT previously in this department (rotation)
               const aWasHere = (a.previous_departments || []).includes(dept.id) ? 1 : 0;
               const bWasHere = (b.previous_departments || []).includes(dept.id) ? 1 : 0;
               if (aWasHere !== bWasHere) return aWasHere - bWasHere;
 
-              // Quaternary: more experienced nurses get slight priority for night shifts
               if (shiftType === "night") {
                 return (b.experience_years || 0) - (a.experience_years || 0);
               }
@@ -181,7 +234,6 @@ serve(async (req) => {
               return 0;
             });
 
-          // Assign up to nursesPerShiftPerDept nurses
           const toAssign = eligible.slice(0, nursesPerShiftPerDept);
 
           for (const nurse of toAssign) {
@@ -210,20 +262,19 @@ serve(async (req) => {
       );
     }
 
-    // Insert in batches of 500 (Supabase limit)
-    const batchSize = 500;
-    for (let i = 0; i < scheduleEntries.length; i += batchSize) {
-      const batch = scheduleEntries.slice(i, i + batchSize);
+    // Insert schedules in batches
+    for (let i = 0; i < scheduleEntries.length; i += 500) {
+      const batch = scheduleEntries.slice(i, i + 500);
       const { error: insertErr } = await supabase.from("schedules").insert(batch);
       if (insertErr) throw insertErr;
     }
 
-    // Build summary stats
     const stats = {
       total_entries: scheduleEntries.length,
       nurses_scheduled: new Set(scheduleEntries.map((e) => e.nurse_id)).size,
       days_covered: weekDays.length,
       departments_covered: departments.length,
+      leave_days_assigned: newLeaveRecords.length,
       shifts_per_nurse: Object.fromEntries(
         Object.entries(nurseShiftCount).filter(([, v]) => v > 0)
       ),
@@ -234,12 +285,11 @@ serve(async (req) => {
       user_id: user.id,
       action: "schedule_generated",
       entity_type: "schedule",
-      description: `Generated schedule for week ${week_number} of ${year}: ${stats.total_entries} entries for ${stats.nurses_scheduled} nurses`,
+      description: `Generated schedule for week ${week_number} of ${year}: ${stats.total_entries} entries for ${stats.nurses_scheduled} nurses, ${stats.leave_days_assigned} leave days assigned`,
     });
 
     // Send notifications to all scheduled nurses
     const scheduledNurseIds = [...new Set(scheduleEntries.map((e) => e.nurse_id))];
-    // Look up user_ids for these nurse records
     const { data: nurseUsers } = await supabase
       .from("nurses")
       .select("id, user_id")
@@ -254,7 +304,6 @@ serve(async (req) => {
         notification_type: "schedule_published",
       }));
 
-      // Insert in batches
       for (let i = 0; i < notifications.length; i += 500) {
         await supabase.from("notifications").insert(notifications.slice(i, i + 500));
       }
@@ -272,12 +321,9 @@ serve(async (req) => {
   }
 });
 
-/**
- * Get the Monday date of a given ISO week number and year.
- */
 function getDateOfISOWeek(week: number, year: number): Date {
   const jan4 = new Date(year, 0, 4);
-  const dayOfWeek = jan4.getDay() || 7; // Mon=1 ... Sun=7
+  const dayOfWeek = jan4.getDay() || 7;
   const monday = new Date(jan4);
   monday.setDate(jan4.getDate() - dayOfWeek + 1 + (week - 1) * 7);
   return monday;
