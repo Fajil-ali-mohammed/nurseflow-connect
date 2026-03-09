@@ -7,8 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import {
   Calendar, Clock, ArrowLeftRight, Bell, User, LogOut, Menu, X,
-  Activity, Building2, ChevronRight, Loader2, BellRing
+  Activity, Building2, ChevronRight, Loader2, BellRing, Camera
 } from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import logo from "@/assets/logo.png";
 import { subscribeToPush, isPushSupported } from "@/lib/pushNotifications";
 
@@ -638,11 +639,64 @@ const NotificationsView = ({ userId, onRead }: { userId: string; onRead: () => v
 // ─── Profile View ───────────────────────────────────────────────
 
 const ProfileView = ({ profile }: { profile: NurseProfile }) => {
+  const { user } = useAuth();
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
   const initials = profile.name
     .split(" ")
     .map((w) => w[0])
     .join("")
     .toUpperCase();
+
+  useEffect(() => {
+    // Fetch current photo_url from nurses table
+    const fetchPhoto = async () => {
+      const { data } = await supabase
+        .from("nurses")
+        .select("photo_url")
+        .eq("id", profile.id)
+        .maybeSingle();
+      if (data?.photo_url) setPhotoUrl(data.photo_url);
+    };
+    fetchPhoto();
+  }, [profile.id]);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Invalid file", description: "Please select an image file.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Max 5MB allowed.", variant: "destructive" });
+      return;
+    }
+
+    setUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `${user.id}/profile.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("nurse-photos")
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      toast({ title: "Upload failed", description: uploadError.message, variant: "destructive" });
+      setUploading(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage.from("nurse-photos").getPublicUrl(path);
+    const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+
+    await supabase.from("nurses").update({ photo_url: publicUrl } as any).eq("id", profile.id);
+    setPhotoUrl(publicUrl);
+    setUploading(false);
+    toast({ title: "Photo updated!", description: "Your profile photo has been saved." });
+  };
 
   const fields = [
     { label: "Phone", value: profile.phone },
@@ -658,7 +712,32 @@ const ProfileView = ({ profile }: { profile: NurseProfile }) => {
     <div className="animate-fade-in">
       <div className="rounded-xl bg-card p-6 shadow-card">
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-2xl font-bold text-primary">{initials}</div>
+          <div className="relative group">
+            <Avatar className="h-16 w-16 text-2xl">
+              {photoUrl ? (
+                <AvatarImage src={photoUrl} alt={profile.name} className="object-cover" />
+              ) : null}
+              <AvatarFallback className="bg-primary/10 text-primary font-bold text-xl">{initials}</AvatarFallback>
+            </Avatar>
+            <label
+              htmlFor="photo-upload"
+              className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              {uploading ? (
+                <Loader2 className="h-5 w-5 animate-spin text-white" />
+              ) : (
+                <Camera className="h-5 w-5 text-white" />
+              )}
+            </label>
+            <input
+              id="photo-upload"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoUpload}
+              disabled={uploading}
+            />
+          </div>
           <div>
             <h2 className="text-xl font-bold text-foreground">{profile.name}</h2>
             <p className="text-sm text-muted-foreground">Registered Nurse</p>
