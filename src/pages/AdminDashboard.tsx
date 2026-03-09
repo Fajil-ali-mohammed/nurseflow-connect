@@ -8,12 +8,12 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import {
   LayoutDashboard, Users, UserPlus, Calendar, ArrowLeftRight, Activity, LogOut,
-  Menu, X, Loader2, Search, Wand2, Check, XCircle, Plus
+  Menu, X, Loader2, Search, Wand2, Check, XCircle, Plus, Shield
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import logo from "@/assets/logo.png";
 
-type Tab = "overview" | "nurses" | "head_nurses" | "schedules" | "swaps" | "logs";
+type Tab = "overview" | "nurses" | "head_nurses" | "admins" | "schedules" | "swaps" | "logs";
 
 const SHIFT_LABELS: Record<string, string> = {
   morning: "Morning (6AM-2PM)",
@@ -51,6 +51,7 @@ const AdminDashboard = () => {
     { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
     { key: "nurses" as const, icon: Users, label: "All Nurses" },
     { key: "head_nurses" as const, icon: UserPlus, label: "Head Nurses" },
+    { key: "admins" as const, icon: Shield, label: "Admins" },
     { key: "schedules" as const, icon: Calendar, label: "Schedules" },
     { key: "swaps" as const, icon: ArrowLeftRight, label: "Swap Requests" },
     { key: "logs" as const, icon: Activity, label: "Activity Logs" },
@@ -93,6 +94,7 @@ const AdminDashboard = () => {
           {activeTab === "overview" && <AdminOverview />}
           {activeTab === "nurses" && <AdminNurses />}
           {activeTab === "head_nurses" && <AdminHeadNurses />}
+          {activeTab === "admins" && <AdminAdmins />}
           {activeTab === "schedules" && <AdminSchedules />}
           {activeTab === "swaps" && <AdminSwaps />}
           {activeTab === "logs" && <AdminLogs />}
@@ -665,6 +667,133 @@ const AdminLogs = () => {
               </span>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Admins ─────────────────────────────────────────────────────
+
+const AdminAdmins = () => {
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: "", username: "", password: "" });
+
+  const fetchData = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("admins")
+      .select("id, name, username, created_at")
+      .order("created_at", { ascending: false });
+    setAdmins(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.name || !form.username || !form.password) {
+      toast({ title: "Missing fields", description: "Name, username and password are required.", variant: "destructive" });
+      return;
+    }
+    if (form.password.length < 6) {
+      toast({ title: "Weak password", description: "Password must be at least 6 characters.", variant: "destructive" });
+      return;
+    }
+    setCreating(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const email = `${form.username.toLowerCase().replace(/\s/g, "")}@admin.local`;
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/create-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+        body: JSON.stringify({
+          email,
+          password: form.password,
+          role: "admin",
+          name: form.name,
+          username: form.username,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to create admin");
+      toast({ title: "Admin Created", description: `${form.name} can now log in with username "${form.username}".` });
+      setForm({ name: "", username: "", password: "" });
+      setShowForm(false);
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="animate-fade-in space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-foreground">Admins ({admins.length})</h2>
+        <Button variant="hero" size="sm" onClick={() => setShowForm(!showForm)}>
+          <Plus size={16} className="mr-1" /> Add Admin
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="rounded-xl bg-card p-5 shadow-card space-y-4">
+          <h3 className="text-sm font-bold text-foreground">Create Admin Account</h3>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Full Name *</label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. John Smith" className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Username *</label>
+              <Input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="e.g. jsmith" className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Password *</label>
+              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" className="mt-1" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="hero" size="sm" onClick={handleCreate} disabled={creating}>
+              {creating ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Check size={14} className="mr-1" />}
+              {creating ? "Creating..." : "Create Account"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {admins.length === 0 ? (
+        <div className="rounded-xl bg-card p-12 text-center shadow-card">
+          <Shield className="mx-auto h-10 w-10 text-muted-foreground/30" />
+          <p className="mt-4 text-sm text-muted-foreground">No admins in the database yet. Click "Add Admin" to create one.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl bg-card shadow-card">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b bg-muted/50">
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Name</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Username</th>
+              <th className="px-4 py-3 text-left font-semibold text-foreground">Created</th>
+            </tr></thead>
+            <tbody className="divide-y">
+              {admins.map((admin) => (
+                <tr key={admin.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium text-foreground">{admin.name}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{admin.username}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{new Date(admin.created_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

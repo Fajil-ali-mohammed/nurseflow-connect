@@ -44,6 +44,14 @@ serve(async (req) => {
       if (error) throw error;
     }
 
+    // If admin, create admins record
+    if (role === "admin" && username) {
+      const { error } = await supabase
+        .from("admins")
+        .insert({ user_id: userId, name, username });
+      if (error) throw error;
+    }
+
     return new Response(JSON.stringify({ success: true, user_id: userId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
