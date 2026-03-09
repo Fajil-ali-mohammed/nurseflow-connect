@@ -7,8 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import {
   Calendar, Clock, ArrowLeftRight, Bell, User, LogOut, Menu, X,
-  Activity, Building2, ChevronRight, Loader2, BellRing
+  Activity, Building2, ChevronRight, Loader2, BellRing, Camera
 } from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import logo from "@/assets/logo.png";
 import { subscribeToPush, isPushSupported } from "@/lib/pushNotifications";
 
