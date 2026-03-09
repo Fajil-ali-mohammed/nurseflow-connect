@@ -213,6 +213,41 @@ export type Database = {
         }
         Relationships: []
       }
+      nurse_leaves: {
+        Row: {
+          approved_by: string | null
+          created_at: string
+          id: string
+          leave_date: string
+          nurse_id: string
+          reason: string | null
+        }
+        Insert: {
+          approved_by?: string | null
+          created_at?: string
+          id?: string
+          leave_date: string
+          nurse_id: string
+          reason?: string | null
+        }
+        Update: {
+          approved_by?: string | null
+          created_at?: string
+          id?: string
+          leave_date?: string
+          nurse_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nurse_leaves_nurse_id_fkey"
+            columns: ["nurse_id"]
+            isOneToOne: false
+            referencedRelation: "nurses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       nurse_removals: {
         Row: {
           id: string
