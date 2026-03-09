@@ -51,6 +51,7 @@ const AdminDashboard = () => {
     { key: "overview" as const, icon: LayoutDashboard, label: "Overview" },
     { key: "nurses" as const, icon: Users, label: "All Nurses" },
     { key: "head_nurses" as const, icon: UserPlus, label: "Head Nurses" },
+    { key: "admins" as const, icon: Shield, label: "Admins" },
     { key: "schedules" as const, icon: Calendar, label: "Schedules" },
     { key: "swaps" as const, icon: ArrowLeftRight, label: "Swap Requests" },
     { key: "logs" as const, icon: Activity, label: "Activity Logs" },
