@@ -120,11 +120,26 @@ serve(async (req) => {
         if (subscriptions && subscriptions.length > 0) {
           for (const sub of subscriptions) {
             try {
-              // Use Web Push protocol
               await sendWebPush(sub, { title, body: message, icon: "/favicon.ico", tag: `duty-${reminder.type}-${schedule.id}` });
             } catch (pushErr) {
               console.error(`Push failed for endpoint ${sub.endpoint}:`, pushErr);
             }
+          }
+        }
+
+        // Send WhatsApp reminder
+        const { data: nursePhone } = await supabase
+          .from("nurses")
+          .select("phone")
+          .eq("id", schedule.nurse_id)
+          .maybeSingle();
+
+        if (nursePhone?.phone) {
+          try {
+            await sendWhatsAppMessage(nursePhone.phone, message);
+            console.log(`WhatsApp reminder sent to ${nurse.name} at ${nursePhone.phone}`);
+          } catch (waErr) {
+            console.error(`WhatsApp failed for ${nurse.name}:`, waErr);
           }
         }
 
@@ -154,7 +169,6 @@ serve(async (req) => {
 
 /**
  * Send a web push notification using the Web Push protocol.
- * This is a simplified implementation that sends the payload to the push endpoint.
  */
 async function sendWebPush(
   subscription: { endpoint: string; p256dh: string; auth: string },
@@ -162,17 +176,56 @@ async function sendWebPush(
 ): Promise<void> {
   const response = await fetch(subscription.endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      TTL: "86400",
-    },
+    headers: { "Content-Type": "application/json", TTL: "86400" },
     body: JSON.stringify(payload),
   });
-
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Push send failed [${response.status}]: ${text}`);
   } else {
-    await response.text(); // consume body
+    await response.text();
+  }
+}
+
+/**
+ * Send a WhatsApp message via WhatsApp Business API.
+ */
+async function sendWhatsAppMessage(phone: string, message: string): Promise<void> {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+
+  if (!accessToken || !phoneNumberId) {
+    throw new Error("WhatsApp credentials not configured");
+  }
+
+  // Format phone: remove leading 0, ensure country code
+  let formattedPhone = phone.replace(/\s+/g, "").replace(/^0+/, "");
+  if (!formattedPhone.startsWith("+")) {
+    formattedPhone = `+251${formattedPhone}`; // Default to Ethiopia country code
+  }
+  formattedPhone = formattedPhone.replace("+", "");
+
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: formattedPhone,
+        type: "text",
+        text: { body: message },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`WhatsApp send failed [${response.status}]: ${text}`);
+  } else {
+    await response.text();
   }
 }
